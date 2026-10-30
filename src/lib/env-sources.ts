@@ -1,13 +1,16 @@
+import { BUILTIN_SOURCES } from './default-sources';
 import type { SourceConfig } from './types';
 
 /**
  * 部署者通过 DEFAULT_SOURCES 环境变量预置的采集站。
  * 格式为 JSON 数组：[{"name":"源名","url":"https://.../api.php/provide/vod","detail":"https://...","isAdult":false}]
- * 解析失败时告警并整体忽略，不影响站点运行。
+ *
+ * 未配置（或配置为空）时使用内置默认源；显式配置 `[]` 可关闭内置源。
+ * 解析失败时告警并回退到内置默认源，不影响站点运行。
  */
 export function getEnvSources(): SourceConfig[] {
   const raw = process.env.DEFAULT_SOURCES;
-  if (!raw || !raw.trim()) return [];
+  if (!raw || !raw.trim()) return BUILTIN_SOURCES.map((s) => ({ ...s }));
   try {
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) throw new Error('必须是 JSON 数组');
@@ -32,7 +35,10 @@ export function getEnvSources(): SourceConfig[] {
     });
     return list;
   } catch (err) {
-    console.warn('[LibreTV] DEFAULT_SOURCES 解析失败，已忽略：', err instanceof Error ? err.message : err);
-    return [];
+    console.warn(
+      '[LibreTV] DEFAULT_SOURCES 解析失败，已回退到内置默认源：',
+      err instanceof Error ? err.message : err
+    );
+    return BUILTIN_SOURCES.map((s) => ({ ...s }));
   }
 }

@@ -4,11 +4,9 @@ import { SESSION_COOKIE, checkRateLimit, sessionFromCookieHeader, signSession, c
 export const runtime = 'nodejs';
 
 export async function POST(req: Request) {
+  // 未配置 PASSWORD = 公开访问，无需登录
   if (!isPasswordConfigured()) {
-    return NextResponse.json(
-      { success: false, error: '服务器未设置 PASSWORD 环境变量，请联系管理员配置' },
-      { status: 503 }
-    );
+    return NextResponse.json({ success: true });
   }
 
   const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || req.headers.get('x-real-ip') || 'unknown';
@@ -51,9 +49,9 @@ export async function POST(req: Request) {
   return res;
 }
 
-/** GET：查询当前会话状态 */
+/** GET：查询当前会话状态（未配置 PASSWORD 时始终为已验证） */
 export async function GET(req: Request) {
-  const verified = sessionFromCookieHeader(req.headers.get('cookie'));
+  const verified = !isPasswordConfigured() || sessionFromCookieHeader(req.headers.get('cookie'));
   return NextResponse.json({ success: true, verified });
 }
 

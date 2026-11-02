@@ -30,8 +30,8 @@ LibreTV Next.js 迁移版：免费在线视频聚合搜索与观看平台。基�
 ### Docker（推荐）
 
 ```bash
-# 在 .env 中设置 PASSWORD
-echo "PASSWORD=your-password" > .env
+# 可选：在 .env 中设置 PASSWORD 启用访问密码；不设置则无需登录
+# echo "PASSWORD=your-password" > .env
 
 # 方式一：拉取发布镜像（零构建）
 docker compose pull && docker compose up -d
@@ -51,7 +51,7 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - PASSWORD=change-me   # 必填：访问密码，务必修改
+      # - PASSWORD=change-me   # 可选：访问密码；不设置则无需登录
       # - PROXY_SECRET=your-secret          # 会话/代理签名密钥，多实例部署建议设置
       # - DEFAULT_SOURCES=[{"name":"示例源","url":"https://example.com/api.php/provide/vod"}]
       # - DEFAULT_LIVE_SOURCES=[{"name":"示例直播源","url":"https://example.com/list.m3u"}]
@@ -66,7 +66,7 @@ services:
 docker compose pull && docker compose up -d
 ```
 
-> 💡 **对外提供服务建议套上 HTTPS**：登录密码在 POST body 中以明文传输，公网 HTTP 会被中间人看到，推荐用反向代理（Nginx / Caddy / Traefik）或 Cloudflare 终结 TLS。
+> 💡 **对外提供服务建议套上 HTTPS**：启用访问密码后，密码在 POST body 中以明文传输，公网 HTTP 会被中间人看到，推荐用反向代理（Nginx / Caddy / Traefik）或 Cloudflare 终结 TLS。
 > 登录本身**不依赖 HTTPS**：会话 cookie 的 `Secure` 标记按请求协议（`x-forwarded-proto`）自动推导，`http://服务器IP:端口` 也能正常登录，不会再出现"密码正确却无法登录"。需要强制指定时用 `COOKIE_SECURE`。
 
 镜像发布在 GHCR 与 Docker Hub：`ghcr.io/librespark/libretv` 与 `docker.io/bestzwei/libretv`
@@ -86,7 +86,7 @@ VER="<版本>"
 mkdir -p libretv                      # 包内没有顶层目录，目标目录必须先存在
 tar -xzf "libretv-${VER}-standalone.tar.gz" -C libretv
 cd libretv
-PASSWORD=your-password PORT=8080 node server.js
+PORT=8080 node server.js            # 可选：PASSWORD=your-password 启用访问密码
 ```
 
 > 不传 `PORT` 时监听 **3000**（standalone 的 `server.js` 默认值），与 Docker 镜像内的 8080 不同，按需显式指定即可。
@@ -97,15 +97,15 @@ PASSWORD=your-password PORT=8080 node server.js
 
 ```bash
 npm install
-PASSWORD=your-password npm run build
-PASSWORD=your-password npm start   # 监听 8080
+npm run build
+npm start   # 监听 8080；可选：PASSWORD=your-password 启用访问密码
 ```
 
 ### 环境变量
 
 | 变量 | 必填 | 说明 |
 | --- | --- | --- |
-| `PASSWORD` | 是 | 访问密码；未设置时站点会提示管理员配置 |
+| `PASSWORD` | 否 | 访问密码；不设置时无需登录，直接公开访问 |
 | `PROXY_SECRET` | 否 | 会话/代理签名密钥；不设置时从 PASSWORD 派生（多实例部署建议显式设置） |
 | `DEFAULT_SOURCES` | 否 | 预置采集站（JSON 数组），用户端自动出现且默认勾选，详见[配置文档](https://libretv.is-an.org/wiki/Configuration.html)。未配置时使用内置默认源，显式设为 `[]` 可关闭内置源 |
 | `REQUEST_TIMEOUT` | 否 | 代理上游请求超时（毫秒），默认 8000 |
@@ -232,7 +232,7 @@ PASSWORD=your-password npm start   # 监听 8080
 
 ```bash
 npm install
-PASSWORD=dev-password npm run dev   # http://localhost:8080
+npm run dev   # http://localhost:8080；可选：PASSWORD=dev-password 启用访问密码
 npm test                            # 核心库单元测试（cms-parser / m3u8 / ssrf）
 npm run typecheck
 ```
@@ -252,7 +252,8 @@ CI 校验通过后自动构建并推送 `ghcr.io/librespark/libretv:<版本>`（
 
 ## 安全说明
 
-- 密码只保存在服务端环境变量中，前端不持有任何可重放凭证。
+- 未配置 `PASSWORD` 时为公开访问模式，任何人都可调用接口；公网部署建议设置密码或在外层加访问控制。
+- 配置 `PASSWORD` 后，密码只保存在服务端环境变量中，前端不持有任何可重放凭证。
 - 登录接口有 IP 速率限制（10 次 / 10 分钟）。
 - 代理内置 SSRF 防护：拒绝内网/保留地址（含 DNS 解析后校验），仅放行 http(s)。
 - 未登录会话仅允许代理图片类目标（豆瓣封面防盗链需要）。

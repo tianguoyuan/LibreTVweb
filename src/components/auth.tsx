@@ -56,7 +56,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .then((s) => {
         if (cancelled) return;
         setVerified(s.verified);
-        setSetupRequired(!s.passwordRequired);
+        // 未配置 PASSWORD 是正常的公开访问模式，不再提示「需要配置密码」
+        setSetupRequired(false);
         setVersion(s.version);
         setChecked(true);
       })

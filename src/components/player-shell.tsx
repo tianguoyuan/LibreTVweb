@@ -491,9 +491,7 @@ export function PlayerShell({
   useEffect(() => {
     if (!containerRef.current || !propsRef.current.url) return;
     const initialUrl = propsRef.current.url;
-    // ArtPlayer 默认 3 秒才隐藏控制栏；桌面失去鼠标悬停后缩短为 0.8 秒。
-    // 触屏没有 hover，自动隐藏会让按钮来不及点（issue #937）：改为常驻，
-    // 由「点按视频 toggle」收起。CONTROL_HIDE_TIME 是 static，创建后修改立即生效。
+    // 控制栏自动隐藏统一为 3 秒（3000ms），桌面与移动端保持一致
     const touchPointer = prefersTouchPointer();
     Artplayer.CONTROL_HIDE_TIME = touchPointer ? TOUCH_CONTROL_HIDE_MS : DESKTOP_CONTROL_HIDE_MS;
 
@@ -839,14 +837,14 @@ export function PlayerShell({
     const el = containerRef.current;
 
     // 全屏时播放器覆盖整个视口，无法依赖 mouseleave 判断“移出播放器”。
-    // 改为按鼠标活动计时：停止移动后快速收起控制栏，移动时立即显示。
+    // 改为按鼠标活动计时：停止移动 3 秒后收起控制栏，移动时立即显示。
     let controlHideTimer: ReturnType<typeof setTimeout> | null = null;
     const showControlsOnPointerMove = () => {
       art.controls.show = true;
       if (controlHideTimer) clearTimeout(controlHideTimer);
       controlHideTimer = setTimeout(() => {
         if (!art.setting.show) art.controls.show = false;
-      }, 800);
+      }, DESKTOP_CONTROL_HIDE_MS);
     };
     const hideControlsOnMouseLeave = () => {
       if (controlHideTimer) clearTimeout(controlHideTimer);

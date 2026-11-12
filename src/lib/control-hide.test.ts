@@ -11,16 +11,9 @@ describe('控制栏隐藏策略', () => {
     expect(ART_DEFAULT_CONTROL_HIDE_MS).toBe(Artplayer.CONTROL_HIDE_TIME);
   });
 
-  it('桌面收紧到 800ms，快于库默认', () => {
-    expect(DESKTOP_CONTROL_HIDE_MS).toBe(800);
-    expect(DESKTOP_CONTROL_HIDE_MS).toBeLessThan(ART_DEFAULT_CONTROL_HIDE_MS);
-  });
-
-  it('触屏常驻：复刻 ArtPlayer 的 timeupdate 判定，永不满足隐藏条件', () => {
-    // ArtPlayer: Date.now() - timer >= CONTROL_HIDE_TIME 时 hide
-    const timer = Date.now();
-    expect(Date.now() - timer >= TOUCH_CONTROL_HIDE_MS).toBe(false);
-    // 即便计时器被异常修改到很久以前，也不会溢出成真
-    expect(Date.now() - 0 >= TOUCH_CONTROL_HIDE_MS).toBe(false);
+  it('控制栏自动隐藏时长统一为 3000ms（3秒）', () => {
+    expect(DESKTOP_CONTROL_HIDE_MS).toBe(3000);
+    expect(TOUCH_CONTROL_HIDE_MS).toBe(3000);
+    expect(DESKTOP_CONTROL_HIDE_MS).toBe(ART_DEFAULT_CONTROL_HIDE_MS);
   });
 });

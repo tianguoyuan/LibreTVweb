@@ -358,6 +358,67 @@ export function LivePlayer({ url, title, onPrevChannel, onNextChannel }: LivePla
       } catch { /* 忽略 */ }
     });
 
+    // —— 移动端触摸手势与控制条显隐 ——
+    const el = containerRef.current;
+    let touchStartX = 0;
+    let touchStartY = 0;
+    let touchMoved = false;
+    let touchTargetIsControls = false;
+    let lastTouchEndTime = 0;
+    let lastTapTime = 0;
+
+    const onTouchStart = (e: TouchEvent) => {
+      const target = e.target as HTMLElement | null;
+      touchTargetIsControls = Boolean(
+        target?.closest?.('.art-bottom, .art-controls, .art-settings, .art-state, button, a, [role="button"]')
+      );
+      if (touchTargetIsControls) return;
+
+      const touch = e.touches[0];
+      touchStartX = touch?.clientX ?? 0;
+      touchStartY = touch?.clientY ?? 0;
+      touchMoved = false;
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      if (!touchTargetIsControls && e.touches[0]) {
+        const dx = Math.abs(e.touches[0].clientX - touchStartX);
+        const dy = Math.abs(e.touches[0].clientY - touchStartY);
+        if (dx > 10 || dy > 10) touchMoved = true;
+      }
+    };
+
+    const onTouchEnd = () => {
+      if (touchTargetIsControls || touchMoved) return;
+
+      lastTouchEndTime = Date.now();
+      const now = Date.now();
+      if (now - lastTapTime < 300) {
+        // 双击视频画面：播放 / 暂停
+        lastTapTime = 0;
+        art.toggle();
+      } else {
+        // 单击视频画面：切换控制条显隐
+        lastTapTime = now;
+        art.controls.show = !art.controls.show;
+      }
+    };
+
+    const onClickCapture = (e: MouseEvent) => {
+      if (Date.now() - lastTouchEndTime < 500) {
+        const target = e.target as HTMLElement | null;
+        if (!target?.closest?.('.art-bottom, .art-controls, .art-settings, .art-state, button, a')) {
+          e.stopPropagation();
+        }
+      }
+    };
+
+    el?.addEventListener('touchstart', onTouchStart, { passive: true });
+    el?.addEventListener('touchend', onTouchEnd);
+    el?.addEventListener('touchcancel', onTouchEnd);
+    el?.addEventListener('touchmove', onTouchMove, { passive: true });
+    el?.addEventListener('click', onClickCapture, { capture: true });
+
     // 15s 内未起播则提示
     const startTimer = setTimeout(() => {
       if (!playbackStarted && !disposed && !destroyed) {
@@ -369,6 +430,11 @@ export function LivePlayer({ url, title, onPrevChannel, onNextChannel }: LivePla
       disposed = true;
       clearTimeout(startTimer);
       if (hintTimerRef.current) clearTimeout(hintTimerRef.current);
+      el?.removeEventListener('touchstart', onTouchStart);
+      el?.removeEventListener('touchend', onTouchEnd);
+      el?.removeEventListener('touchcancel', onTouchEnd);
+      el?.removeEventListener('touchmove', onTouchMove);
+      el?.removeEventListener('click', onClickCapture, { capture: true });
       cleanupEngines();
       art.destroy();
       artRef.current = null;

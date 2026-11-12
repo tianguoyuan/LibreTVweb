@@ -860,32 +860,94 @@ export function PlayerShell({
       showControlsOnPointerMove();
     }
 
+    // —— 移动端触摸手势与控制条显隐 ——
+    let touchStartX = 0;
+    let touchStartY = 0;
+    let touchMoved = false;
+    let touchTargetIsControls = false;
+    let lastTouchEndTime = 0;
+    let lastTapTime = 0;
+
     const onTouchStart = (e: TouchEvent) => {
-      if (art.video?.paused) return;
-      // 已有触控在处理时忽略新手指：否则第二指会把 originalRate 捕获成 3.0，
-      // 松手后倍速永久卡在 3x；旧定时器句柄也会被覆盖成无法清除的幽灵触发
-      if (isLongPress || longPressTimer) return;
-      // 控制栏 / 设置面板上的长按不触发倍速（按住进度条拖动、长按倍速菜单项会误触）
-      if ((e.target as HTMLElement).closest?.('.art-controls, .art-settings')) return;
-      originalRate = art.video.playbackRate;
-      longPressTimer = setTimeout(() => {
-        if (art.video?.paused) return;
-        art.video.playbackRate = 3.0;
-        isLongPress = true;
-        showHint('3 倍速');
-      }, 500);
+      const target = e.target as HTMLElement | null;
+      // 控制栏 / 设置菜单 / 按钮上的触摸不判定为画面点击
+      touchTargetIsControls = Boolean(
+        target?.closest?.('.art-bottom, .art-controls, .art-settings, .art-state, button, a, [role="button"]')
+      );
+      if (touchTargetIsControls) return;
+
+      const touch = e.touches[0];
+      touchStartX = touch?.clientX ?? 0;
+      touchStartY = touch?.clientY ?? 0;
+      touchMoved = false;
+
+      // 仅在视频播放且非长按状态下开启 3 倍速长按计时
+      if (!art.video?.paused && !isLongPress && !longPressTimer) {
+        originalRate = art.video.playbackRate;
+        longPressTimer = setTimeout(() => {
+          if (art.video?.paused) return;
+          art.video.playbackRate = 3.0;
+          isLongPress = true;
+          showHint('3 倍速');
+        }, 500);
+      }
     };
+
+    const onTouchMove = (e: TouchEvent) => {
+      if (isLongPress) {
+        e.preventDefault();
+        return;
+      }
+      if (!touchTargetIsControls && e.touches[0]) {
+        const dx = Math.abs(e.touches[0].clientX - touchStartX);
+        const dy = Math.abs(e.touches[0].clientY - touchStartY);
+        if (dx > 10 || dy > 10) {
+          touchMoved = true;
+          if (longPressTimer) {
+            clearTimeout(longPressTimer);
+            longPressTimer = null;
+          }
+        }
+      }
+    };
+
     const onTouchEnd = () => {
-      if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+      if (longPressTimer) {
+        clearTimeout(longPressTimer);
+        longPressTimer = null;
+      }
       if (isLongPress) {
         art.video.playbackRate = originalRate;
         isLongPress = false;
         showHint(`${originalRate} 倍速`);
+        return;
+      }
+
+      if (touchTargetIsControls || touchMoved) return;
+
+      lastTouchEndTime = Date.now();
+      const now = Date.now();
+      if (now - lastTapTime < 300) {
+        // 双击视频画面：播放 / 暂停
+        lastTapTime = 0;
+        art.toggle();
+      } else {
+        // 单击视频画面：切换控制条显隐
+        lastTapTime = now;
+        art.controls.show = !art.controls.show;
       }
     };
-    const onTouchMove = (e: TouchEvent) => {
-      if (isLongPress) e.preventDefault();
+
+    // 抑制 touch 触发后浏览器合成的 click 事件冒泡，防止与 ArtPlayer 原生 toggle 冲突
+    const onClickCapture = (e: MouseEvent) => {
+      if (Date.now() - lastTouchEndTime < 500) {
+        const target = e.target as HTMLElement | null;
+        if (!target?.closest?.('.art-bottom, .art-controls, .art-settings, .art-state, button, a')) {
+          e.stopPropagation();
+        }
+      }
     };
+
     // ArtPlayer 的 contextmenu 组件只在桌面端初始化（移动端构造函数里跳过 init），
     // 长按倍速因而会连带呼出系统原生菜单/气泡。播放器表面没有可用的原生菜单，统一抑制
     const onContextMenu = (e: Event) => e.preventDefault();
@@ -893,6 +955,7 @@ export function PlayerShell({
     el?.addEventListener('touchend', onTouchEnd);
     el?.addEventListener('touchcancel', onTouchEnd);
     el?.addEventListener('touchmove', onTouchMove, { passive: false });
+    el?.addEventListener('click', onClickCapture, { capture: true });
     el?.addEventListener('contextmenu', onContextMenu);
 
     // 卸载与页面隐藏时保存进度
@@ -919,6 +982,7 @@ export function PlayerShell({
       el?.removeEventListener('touchend', onTouchEnd);
       el?.removeEventListener('touchcancel', onTouchEnd);
       el?.removeEventListener('touchmove', onTouchMove);
+      el?.removeEventListener('click', onClickCapture, { capture: true });
       el?.removeEventListener('contextmenu', onContextMenu);
       art.video?.removeEventListener('resize', reportVideoHeight);
       el?.removeEventListener('mousemove', showControlsOnPointerMove);

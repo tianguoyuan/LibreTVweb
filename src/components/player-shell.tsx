@@ -27,6 +27,8 @@ import {
   ART_DEFAULT_CONTROL_HIDE_MS,
   DESKTOP_CONTROL_HIDE_MS,
   TOUCH_CONTROL_HIDE_MS,
+  isControlsShowing,
+  setControlsVisible,
 } from '@/lib/control-hide';
 
 /** 片段时间统一保留 1 位小数：与面板展示保持一致，避免浮点尾巴 */
@@ -837,20 +839,35 @@ export function PlayerShell({
     const el = containerRef.current;
 
     // 全屏时播放器覆盖整个视口，无法依赖 mouseleave 判断“移出播放器”。
-    // 改为按鼠标活动计时：停止移动 3 秒后收起控制栏，移动时立即显示。
+    // 控制栏显隐管理：鼠标活动计时 3 秒后自动收起；点击画面立即切换显隐。
     let controlHideTimer: ReturnType<typeof setTimeout> | null = null;
-    const showControlsOnPointerMove = () => {
-      art.controls.show = true;
+    let suppressPointerMoveUntil = 0;
+
+    const showControls = () => {
+      setControlsVisible(art, true);
       if (controlHideTimer) clearTimeout(controlHideTimer);
       controlHideTimer = setTimeout(() => {
-        if (!art.setting.show) art.controls.show = false;
+        if (!art.setting?.show) hideControls();
       }, DESKTOP_CONTROL_HIDE_MS);
     };
-    const hideControlsOnMouseLeave = () => {
-      if (controlHideTimer) clearTimeout(controlHideTimer);
-      controlHideTimer = null;
-      art.controls.show = false;
+
+    const hideControls = () => {
+      if (controlHideTimer) {
+        clearTimeout(controlHideTimer);
+        controlHideTimer = null;
+      }
+      setControlsVisible(art, false);
     };
+
+    const showControlsOnPointerMove = () => {
+      if (Date.now() < suppressPointerMoveUntil) return;
+      showControls();
+    };
+
+    const hideControlsOnMouseLeave = () => {
+      hideControls();
+    };
+
     // 触屏不监听 mousemove/mouseleave，也跳过初始显示：iOS 点按视频的合成事件
     // 序列是 mousemove → click，若 mousemove 先把 show 置 true，紧跟的 ArtPlayer
     // click toggle 会把它翻回 false——控制栏「闪一下即隐」，正是 issue #937 的病灶
@@ -867,6 +884,24 @@ export function PlayerShell({
     let touchTargetIsControls = false;
     let lastTouchEndTime = 0;
     let lastTapTime = 0;
+
+    const handleScreenTap = () => {
+      const now = Date.now();
+      if (now - lastTapTime < 300) {
+        // 双击视频画面：播放 / 暂停
+        lastTapTime = 0;
+        art.toggle();
+      } else {
+        // 单击视频画面：切换控制条显隐（显示则立即收起，隐藏则显示）
+        lastTapTime = now;
+        if (isControlsShowing(art)) {
+          hideControls();
+          suppressPointerMoveUntil = Date.now() + 500;
+        } else {
+          showControls();
+        }
+      }
+    };
 
     const onTouchStart = (e: TouchEvent) => {
       const target = e.target as HTMLElement | null;
@@ -926,26 +961,29 @@ export function PlayerShell({
       if (touchTargetIsControls || touchMoved) return;
 
       lastTouchEndTime = Date.now();
-      const now = Date.now();
-      if (now - lastTapTime < 300) {
-        // 双击视频画面：播放 / 暂停
-        lastTapTime = 0;
-        art.toggle();
-      } else {
-        // 单击视频画面：切换控制条显隐
-        lastTapTime = now;
-        art.controls.show = !art.controls.show;
-      }
+      suppressPointerMoveUntil = Date.now() + 500;
+      handleScreenTap();
     };
 
-    // 抑制 touch 触发后浏览器合成的 click 事件冒泡，防止与 ArtPlayer 原生 toggle 冲突
+    // 捕获阶段拦截画面点击：
+    // 1. 控制栏/按钮点击：桌面端刷新自动隐藏倒计时，正常向下分发事件；
+    // 2. 视频画面点击：阻止事件继续传递给 ArtPlayer 原生 click（防止其强制置 controls 为 true 并误触发播放/暂停），统一由 handleScreenTap 处理单击显隐与双击暂停。
     const onClickCapture = (e: MouseEvent) => {
-      if (Date.now() - lastTouchEndTime < 500) {
-        const target = e.target as HTMLElement | null;
-        if (!target?.closest?.('.art-bottom, .art-controls, .art-settings, .art-state, button, a')) {
-          e.stopPropagation();
-        }
+      const target = e.target as HTMLElement | null;
+      const isControls = Boolean(
+        target?.closest?.('.art-bottom, .art-controls, .art-settings, .art-state, button, a, [role="button"]')
+      );
+      if (isControls) {
+        if (!touchPointer) showControls();
+        return;
       }
+
+      e.stopPropagation();
+
+      // 触屏模式下已在 touchend 触发 handleScreenTap，忽略紧随其后的合成 click
+      if (Date.now() - lastTouchEndTime < 500) return;
+
+      handleScreenTap();
     };
 
     // ArtPlayer 的 contextmenu 组件只在桌面端初始化（移动端构造函数里跳过 init），

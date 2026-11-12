@@ -5,7 +5,13 @@ import Artplayer from 'artplayer';
 import Hls, { type HlsConfig } from 'hls.js';
 import { Spinner } from './states';
 import { prefersTouchPointer } from '@/lib/touch-pointer';
-import { ART_DEFAULT_CONTROL_HIDE_MS, TOUCH_CONTROL_HIDE_MS } from '@/lib/control-hide';
+import {
+  ART_DEFAULT_CONTROL_HIDE_MS,
+  DESKTOP_CONTROL_HIDE_MS,
+  TOUCH_CONTROL_HIDE_MS,
+  isControlsShowing,
+  setControlsVisible,
+} from '@/lib/control-hide';
 
 /**
  * 直播播放器：与点播 player-shell 完全独立。
@@ -358,14 +364,67 @@ export function LivePlayer({ url, title, onPrevChannel, onNextChannel }: LivePla
       } catch { /* 忽略 */ }
     });
 
-    // —— 移动端触摸手势与控制条显隐 ——
+    // 控制栏显隐管理：鼠标活动计时 3 秒后自动收起；点击画面立即切换显隐。
     const el = containerRef.current;
+    let controlHideTimer: ReturnType<typeof setTimeout> | null = null;
+    let suppressPointerMoveUntil = 0;
+
+    const showControls = () => {
+      setControlsVisible(art, true);
+      if (controlHideTimer) clearTimeout(controlHideTimer);
+      controlHideTimer = setTimeout(() => {
+        if (!art.setting?.show) hideControls();
+      }, DESKTOP_CONTROL_HIDE_MS);
+    };
+
+    const hideControls = () => {
+      if (controlHideTimer) {
+        clearTimeout(controlHideTimer);
+        controlHideTimer = null;
+      }
+      setControlsVisible(art, false);
+    };
+
+    const showControlsOnPointerMove = () => {
+      if (Date.now() < suppressPointerMoveUntil) return;
+      showControls();
+    };
+
+    const hideControlsOnMouseLeave = () => {
+      hideControls();
+    };
+
+    if (!touchPointer) {
+      el?.addEventListener('mousemove', showControlsOnPointerMove);
+      el?.addEventListener('mouseleave', hideControlsOnMouseLeave);
+      showControlsOnPointerMove();
+    }
+
+    // —— 触摸/点击手势与控制条显隐 ——
     let touchStartX = 0;
     let touchStartY = 0;
     let touchMoved = false;
     let touchTargetIsControls = false;
     let lastTouchEndTime = 0;
     let lastTapTime = 0;
+
+    const handleScreenTap = () => {
+      const now = Date.now();
+      if (now - lastTapTime < 300) {
+        // 双击视频画面：播放 / 暂停
+        lastTapTime = 0;
+        art.toggle();
+      } else {
+        // 单击视频画面：切换控制条显隐（显示则立即收起，隐藏则显示）
+        lastTapTime = now;
+        if (isControlsShowing(art)) {
+          hideControls();
+          suppressPointerMoveUntil = Date.now() + 500;
+        } else {
+          showControls();
+        }
+      }
+    };
 
     const onTouchStart = (e: TouchEvent) => {
       const target = e.target as HTMLElement | null;
@@ -392,25 +451,29 @@ export function LivePlayer({ url, title, onPrevChannel, onNextChannel }: LivePla
       if (touchTargetIsControls || touchMoved) return;
 
       lastTouchEndTime = Date.now();
-      const now = Date.now();
-      if (now - lastTapTime < 300) {
-        // 双击视频画面：播放 / 暂停
-        lastTapTime = 0;
-        art.toggle();
-      } else {
-        // 单击视频画面：切换控制条显隐
-        lastTapTime = now;
-        art.controls.show = !art.controls.show;
-      }
+      suppressPointerMoveUntil = Date.now() + 500;
+      handleScreenTap();
     };
 
+    // 捕获阶段拦截画面点击：
+    // 1. 控制栏/按钮点击：桌面端刷新自动隐藏倒计时，正常向下分发事件；
+    // 2. 视频画面点击：阻止事件继续传递给 ArtPlayer 原生 click（防止其强制置 controls 为 true 并误触发播放/暂停），统一由 handleScreenTap 处理单击显隐与双击暂停。
     const onClickCapture = (e: MouseEvent) => {
-      if (Date.now() - lastTouchEndTime < 500) {
-        const target = e.target as HTMLElement | null;
-        if (!target?.closest?.('.art-bottom, .art-controls, .art-settings, .art-state, button, a')) {
-          e.stopPropagation();
-        }
+      const target = e.target as HTMLElement | null;
+      const isControls = Boolean(
+        target?.closest?.('.art-bottom, .art-controls, .art-settings, .art-state, button, a, [role="button"]')
+      );
+      if (isControls) {
+        if (!touchPointer) showControls();
+        return;
       }
+
+      e.stopPropagation();
+
+      // 触屏模式下已在 touchend 触发 handleScreenTap，忽略紧随其后的合成 click
+      if (Date.now() - lastTouchEndTime < 500) return;
+
+      handleScreenTap();
     };
 
     el?.addEventListener('touchstart', onTouchStart, { passive: true });
@@ -435,6 +498,9 @@ export function LivePlayer({ url, title, onPrevChannel, onNextChannel }: LivePla
       el?.removeEventListener('touchcancel', onTouchEnd);
       el?.removeEventListener('touchmove', onTouchMove);
       el?.removeEventListener('click', onClickCapture, { capture: true });
+      el?.removeEventListener('mousemove', showControlsOnPointerMove);
+      el?.removeEventListener('mouseleave', hideControlsOnMouseLeave);
+      if (controlHideTimer) clearTimeout(controlHideTimer);
       cleanupEngines();
       art.destroy();
       artRef.current = null;
